@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Trash2, Edit, Plus, X, Save } from 'lucide-react';
+import { Trash2, Edit, Plus, X, Save, Wand2, Camera } from 'lucide-react';
 
 const AdminDashboard = () => {
     const [products, setProducts] = useState([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState(null);
+
+    const [isGeneratingDescription, setIsGeneratingDescription] = useState(false);
+    const [isGeneratingFromImage, setIsGeneratingFromImage] = useState(false);
+    const [imageFile, setImageFile] = useState(null);
+
     const [formData, setFormData] = useState({
         name: '',
         description: '',
@@ -19,12 +24,144 @@ const AdminDashboard = () => {
         fetchProducts();
     }, []);
 
+    /* =========================
+       FETCH PRODUCTS
+    ========================== */
     const fetchProducts = async () => {
         try {
             const response = await axios.get('http://localhost:3001/api/products');
             setProducts(response.data);
         } catch (error) {
             console.error('Error fetching products:', error);
+        }
+    };
+
+    /* =========================
+       AI TEXT DESCRIPTION
+    ========================== */
+    const generateDescription = async () => {
+        if (!formData.name && !formData.category) {
+            alert('Please enter product name or category first');
+            return;
+        }
+
+        setIsGeneratingDescription(true);
+
+        try {
+            const response = await axios.post(
+                'http://localhost:3001/api/products/generate-description',
+                {
+                    name: formData.name,
+                    category: formData.category
+                }
+            );
+
+            setFormData(prev => ({
+                ...prev,
+                description: response.data.description
+            }));
+        } catch (error) {
+            console.error('Error generating description:', error);
+            alert('Failed to generate description');
+        } finally {
+            setIsGeneratingDescription(false);
+        }
+    };
+
+    /* =========================
+       IMAGE CHANGE HANDLER
+    ========================== */
+    const handleImageChange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            setImageFile(file);
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                setFormData(prev => ({
+                    ...prev,
+                    image: e.target.result
+                }));
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    /* =========================
+       AI IMAGE → PRODUCT DETAILS
+    ========================== */
+    const generateDetailsFromImage = async () => {
+        if (!imageFile) {
+            alert('Please upload an image first');
+            return;
+        }
+
+        setIsGeneratingFromImage(true);
+
+        const data = new FormData();
+        data.append('image', imageFile);
+
+        try {
+            console.log('Generating details from image...');
+            const response = await axios.post(
+                'http://localhost:3001/api/products/generate-details-from-image',
+                data,
+                {
+                    headers: {
+                        'Content-Type': 'multipart/form-data'
+                    }
+                }
+            );
+
+            const { name, description, category } = response.data.data;
+
+            setFormData(prev => ({
+                ...prev,
+                name,
+                description,
+                category
+            }));
+        } catch (error) {
+            console.error('Error generating details:', error);
+            alert('Failed to generate details from image');
+        } finally {
+            setIsGeneratingFromImage(false);
+        }
+    };
+
+    /* =========================
+       CREATE / UPDATE PRODUCT
+    ========================== */
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        try {
+            if (editingProduct) {
+                await axios.put(
+                    `http://localhost:3001/api/products/${editingProduct._id}`,
+                    formData
+                );
+            } else {
+                await axios.post(
+                    'http://localhost:3001/api/products',
+                    formData
+                );
+            }
+
+            setIsModalOpen(false);
+            setEditingProduct(null);
+            setImageFile(null);
+            setFormData({
+                name: '',
+                description: '',
+                price: '',
+                category: '',
+                stock: '',
+                image: ''
+            });
+
+            fetchProducts();
+        } catch (error) {
+            console.error('Error saving product:', error);
         }
     };
 
@@ -36,23 +173,6 @@ const AdminDashboard = () => {
             } catch (error) {
                 console.error('Error deleting product:', error);
             }
-        }
-    };
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        try {
-            if (editingProduct) {
-                await axios.put(`http://localhost:3001/api/products/${editingProduct._id}`, formData);
-            } else {
-                await axios.post('http://localhost:3001/api/products', formData);
-            }
-            setIsModalOpen(false);
-            setEditingProduct(null);
-            setFormData({ name: '', description: '', price: '', category: '', stock: '', image: '' });
-            fetchProducts();
-        } catch (error) {
-            console.error('Error saving product:', error);
         }
     };
 
@@ -71,54 +191,61 @@ const AdminDashboard = () => {
 
     const openAddModal = () => {
         setEditingProduct(null);
-        setFormData({ name: '', description: '', price: '', category: '', stock: '', image: '' });
+        setImageFile(null);
+        setFormData({
+            name: '',
+            description: '',
+            price: '',
+            category: '',
+            stock: '',
+            image: ''
+        });
         setIsModalOpen(true);
     };
 
     return (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="max-w-7xl mx-auto px-4 py-12">
             <div className="flex justify-between items-center mb-8">
                 <h1 className="text-3xl font-bold">Admin Dashboard</h1>
                 <button
                     onClick={openAddModal}
-                    className="bg-black text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-800"
+                    className="bg-black text-white px-4 py-2 rounded-lg flex items-center gap-2"
                 >
                     <Plus size={20} /> Add Product
                 </button>
             </div>
 
-            <div className="bg-white shadow-sm rounded-lg overflow-hidden border border-gray-200">
-                <table className="min-w-full divide-y divide-gray-200">
+            {/* PRODUCTS TABLE */}
+            <div className="bg-white shadow rounded-lg overflow-hidden">
+                <table className="min-w-full divide-y">
                     <thead className="bg-gray-50">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            <th className="px-6 py-3 text-left">Product</th>
+                            <th className="px-6 py-3 text-left">Category</th>
+                            <th className="px-6 py-3 text-left">Price</th>
+                            <th className="px-6 py-3 text-left">Stock</th>
+                            <th className="px-6 py-3 text-right">Actions</th>
                         </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                        {products.map((product) => (
+                    <tbody>
+                        {products.map(product => (
                             <tr key={product._id}>
-                                <td className="px-6 py-4 whitespace-nowrap">
-                                    <div className="flex items-center">
-                                        <div className="flex-shrink-0 h-10 w-10">
-                                            <img className="h-10 w-10 rounded-full object-cover" src={product.image || 'https://via.placeholder.com/40'} alt="" />
-                                        </div>
-                                        <div className="ml-4">
-                                            <div className="text-sm font-medium text-gray-900">{product.name}</div>
-                                        </div>
-                                    </div>
+                                <td className="px-6 py-4 flex items-center gap-3">
+                                    <img
+                                        src={product.image || 'https://via.placeholder.com/40'}
+                                        className="h-10 w-10 rounded-full object-cover"
+                                        alt=""
+                                    />
+                                    {product.name}
                                 </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{product.category}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${product.price}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{product.stock}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                    <button onClick={() => openEditModal(product)} className="text-indigo-600 hover:text-indigo-900 mr-4">
+                                <td className="px-6 py-4">{product.category}</td>
+                                <td className="px-6 py-4">${product.price}</td>
+                                <td className="px-6 py-4">{product.stock}</td>
+                                <td className="px-6 py-4 text-right">
+                                    <button onClick={() => openEditModal(product)} className="mr-3">
                                         <Edit size={18} />
                                     </button>
-                                    <button onClick={() => handleDelete(product._id)} className="text-red-600 hover:text-red-900">
+                                    <button onClick={() => handleDelete(product._id)}>
                                         <Trash2 size={18} />
                                     </button>
                                 </td>
@@ -128,112 +255,113 @@ const AdminDashboard = () => {
                 </table>
             </div>
 
-            {/* Modal */}
+            {/* MODAL */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 overflow-y-auto">
-                    <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-                        <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-                            <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
-                        </div>
-                        <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-                        <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-                            <form onSubmit={handleSubmit}>
-                                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                                    <div className="flex justify-between items-center mb-4">
-                                        <h3 className="text-lg leading-6 font-medium text-gray-900">
-                                            {editingProduct ? 'Edit Product' : 'Add New Product'}
-                                        </h3>
-                                        <button type="button" onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-500">
-                                            <X size={20} />
-                                        </button>
-                                    </div>
+                <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg w-full max-w-lg p-6">
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div className="flex justify-between">
+                                <h2 className="text-lg font-semibold">
+                                    {editingProduct ? 'Edit Product' : 'Add Product'}
+                                </h2>
+                                <button type="button" onClick={() => setIsModalOpen(false)}>
+                                    <X />
+                                </button>
+                            </div>
 
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700">Name</label>
-                                            <input
-                                                type="text"
-                                                required
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-black focus:border-black sm:text-sm"
-                                                value={formData.name}
-                                                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700">Description</label>
-                                            <textarea
-                                                required
-                                                rows={3}
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-black focus:border-black sm:text-sm"
-                                                value={formData.description}
-                                                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                            />
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-700">Price</label>
-                                                <input
-                                                    type="number"
-                                                    required
-                                                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-black focus:border-black sm:text-sm"
-                                                    value={formData.price}
-                                                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                                                />
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-medium text-gray-700">Stock</label>
-                                                <input
-                                                    type="number"
-                                                    required
-                                                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-black focus:border-black sm:text-sm"
-                                                    value={formData.stock}
-                                                    onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                                                />
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700">Category</label>
-                                            <input
-                                                type="text"
-                                                required
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-black focus:border-black sm:text-sm"
-                                                value={formData.category}
-                                                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700">Image URL</label>
-                                            <input
-                                                type="url"
-                                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-black focus:border-black sm:text-sm"
-                                                value={formData.image}
-                                                onChange={(e) => setFormData({ ...formData, image: e.target.value })}
-                                            />
-                                        </div>
-                                    </div>
+                            {/* IMAGE UPLOAD */}
+                            <div className="space-y-2">
+                                <div className="flex justify-between items-center">
+                                    <label className="text-sm font-medium">Image</label>
+                                    {imageFile && (
+                                        <button
+                                            type="button"
+                                            onClick={generateDetailsFromImage}
+                                            disabled={isGeneratingFromImage}
+                                            className="text-xs text-indigo-600 flex items-center gap-1"
+                                        >
+                                            <Camera size={14} />
+                                            {isGeneratingFromImage ? 'Analyzing...' : 'Snap & Sell'}
+                                        </button>
+                                    )}
                                 </div>
-                                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                                    <button
-                                        type="submit"
-                                        className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-black text-base font-medium text-white hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black sm:ml-3 sm:w-auto sm:text-sm"
-                                    >
-                                        Save
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsModalOpen(false)}
-                                        className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
-                                    >
-                                        Cancel
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handleImageChange}
+                                    className="w-full border px-3 py-2 rounded"
+                                />
+                            </div>
+
+                            <input
+                                placeholder="Name"
+                                value={formData.name}
+                                onChange={e => setFormData({ ...formData, name: e.target.value })}
+                                className="w-full border px-3 py-2 rounded"
+                            />
+
+                            <button
+                                type="button"
+                                onClick={generateDescription}
+                                disabled={isGeneratingDescription}
+                                className="text-sm text-indigo-600 flex items-center gap-1"
+                            >
+                                <Wand2 size={14} />
+                                {isGeneratingDescription ? 'Generating...' : 'Generate with AI'}
+                            </button>
+
+                            <textarea
+                                rows={3}
+                                value={formData.description}
+                                onChange={e => setFormData({ ...formData, description: e.target.value })}
+                                className="w-full border px-3 py-2 rounded"
+                            />
+
+                            <input
+                                type="number"
+                                placeholder="Price"
+                                value={formData.price}
+                                onChange={e => setFormData({ ...formData, price: e.target.value })}
+                                className="w-full border px-3 py-2 rounded"
+                            />
+
+                            <input
+                                type="number"
+                                placeholder="Stock"
+                                value={formData.stock}
+                                onChange={e => setFormData({ ...formData, stock: e.target.value })}
+                                className="w-full border px-3 py-2 rounded"
+                            />
+
+                            <input
+                                placeholder="Category"
+                                value={formData.category}
+                                onChange={e => setFormData({ ...formData, category: e.target.value })}
+                                className="w-full border px-3 py-2 rounded"
+                            />
+
+                            <div className="flex justify-end gap-3 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsModalOpen(false)}
+                                    className="border px-4 py-2 rounded"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    className="bg-black text-white px-4 py-2 rounded"
+                                >
+                                    Save
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             )}
         </div>
     );
+    
 };
 
 export default AdminDashboard;

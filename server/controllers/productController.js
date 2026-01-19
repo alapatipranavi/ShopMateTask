@@ -1,13 +1,14 @@
 const { getDB } = require('../config/db');
 const { ObjectId } = require('mongodb');
+const {
+    generateProductDescriptionWithAI,
+    generateProductDetailsFromImageWithAI
+} = require('../services/aiServices');
 
 const collectionName = 'products';
 
-// Helper to get collection
 const getCollection = () => getDB().collection(collectionName);
 
-// @desc    Fetch all products
-// @route   GET /api/products
 const getProducts = async (req, res) => {
     try {
         const { search } = req.query;
@@ -24,11 +25,10 @@ const getProducts = async (req, res) => {
     }
 };
 
-// @desc    Fetch single product
-// @route   GET /api/products/:id
 const getProductById = async (req, res) => {
     try {
         const { id } = req.params;
+
         if (!ObjectId.isValid(id)) {
             return res.status(400).json({ message: 'Invalid Product ID' });
         }
@@ -45,13 +45,10 @@ const getProductById = async (req, res) => {
     }
 };
 
-// @desc    Create a product
-// @route   POST /api/products
 const createProduct = async (req, res) => {
     try {
         const { name, description, price, category, stock, image } = req.body;
 
-        // Basic Validation
         if (!name || !description || !price || !category) {
             return res.status(400).json({ message: 'Please fill in all required fields' });
         }
@@ -67,8 +64,6 @@ const createProduct = async (req, res) => {
         };
 
         const result = await getCollection().insertOne(newProduct);
-
-        // Fetch the created document to return it
         const createdProduct = await getCollection().findOne({ _id: result.insertedId });
 
         res.status(201).json(createdProduct);
@@ -77,11 +72,10 @@ const createProduct = async (req, res) => {
     }
 };
 
-// @desc    Update a product
-// @route   PUT /api/products/:id
 const updateProduct = async (req, res) => {
     try {
         const { id } = req.params;
+
         if (!ObjectId.isValid(id)) {
             return res.status(400).json({ message: 'Invalid Product ID' });
         }
@@ -89,34 +83,29 @@ const updateProduct = async (req, res) => {
         const updates = { ...req.body };
         if (updates.price) updates.price = Number(updates.price);
         if (updates.stock) updates.stock = Number(updates.stock);
-        delete updates._id; // Prevent updating ID
+        delete updates._id;
 
-        const result = await getCollection().findOneAndUpdate(
+        await getCollection().updateOne(
             { _id: new ObjectId(id) },
-            { $set: updates },
-            { returnDocument: 'after' }
+            { $set: updates }
         );
 
-        if (!result) { // In newer drivers result might be the document or null, or result.value
-            // For mongodb driver v4+, findOneAndUpdate returns a result object. 
-            // If using v6, it returns the document directly if includeResultMetadata is false (default).
-            // Let's check if we found it.
-            const check = await getCollection().findOne({ _id: new ObjectId(id) });
-            if (!check) return res.status(404).json({ message: 'Product not found' });
-            return res.json(check);
+        const updated = await getCollection().findOne({ _id: new ObjectId(id) });
+
+        if (!updated) {
+            return res.status(404).json({ message: 'Product not found' });
         }
 
-        res.json(result);
+        res.json(updated);
     } catch (error) {
         res.status(500).json({ message: 'Server Error', error: error.message });
     }
 };
 
-// @desc    Delete a product
-// @route   DELETE /api/products/:id
 const deleteProduct = async (req, res) => {
     try {
         const { id } = req.params;
+
         if (!ObjectId.isValid(id)) {
             return res.status(400).json({ message: 'Invalid Product ID' });
         }
@@ -133,10 +122,52 @@ const deleteProduct = async (req, res) => {
     }
 };
 
+const generateDescription = async (req, res) => {
+    try {
+        const { name, category } = req.body;
+
+        const description = await generateProductDescriptionWithAI(name, category);
+
+        res.json({ description });
+    } catch (error) {
+        res.status(500).json({
+            message: 'Service Error',
+            error: error.message
+        });
+    }
+};
+
+const generateDetailsFromImage = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'No file uploaded' });
+        }
+
+        console.log("In generateDetailsFromImage", req.file);
+
+        const details = await generateProductDetailsFromImageWithAI(
+            req.file.buffer,
+            req.file.mimetype
+        );
+
+        res.status(200).json({
+            success: true,
+            data: details
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: "This is an error: " + error.message
+        });
+    }
+};
+
 module.exports = {
     getProducts,
     getProductById,
     createProduct,
     updateProduct,
-    deleteProduct
+    deleteProduct,
+    generateDescription,
+    generateDetailsFromImage
 };
